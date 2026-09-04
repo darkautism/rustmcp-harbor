@@ -4,3 +4,4 @@ config/
 workspace/
 *.log
 .DS_Store
+.mcpx.yaml

@@ -2,7 +2,7 @@
 
 RustMCP Harbor is a reusable Rust development container that runs **Rust + MCPX + OpenAI Secure MCP Tunnel** beside any project on TrueNAS SCALE or another Docker host.
 
-It contains no project, tunnel ID, or credentials. Mount your project at `/workspace` and persistent private state at `/config`. Harbor includes a bundled MCPX allow-all default for normal tunnel-enabled startup; a user-supplied `/config/mcpx/config.yaml` always overrides it.
+It contains no project, tunnel ID, or OpenAI credential. Mount your project at `/workspace` and persistent private state at `/config`. For the default path, Harbor automatically generates and persists an internal MCPX Bearer token, configures MCPX to require it, and configures tunnel-client to send it. You do not need to create a separate MCP token.
 
 ## Image
 
@@ -29,9 +29,11 @@ Harbor bundles this template inside the image:
 
 `/usr/share/rustmcp-harbor/default-mcpx-config.yaml`
 
-The bundled template registers `/workspace` and is intentionally **allow-all** for MCPX file access and terminal commands. During normal Secure MCP Tunnel startup, if `/config/mcpx/config.yaml` does not exist, the entrypoint copies the bundled template there. Because `/config` is persistent, that generated file can then be edited normally.
+The bundled template registers `/workspace`, is intentionally **allow-all** for MCPX file access and terminal commands, and uses `auth.mode: bearer`. During normal Secure MCP Tunnel startup, if `/config/mcpx/config.yaml` does not exist, Harbor generates a cryptographically random 256-bit token, stores it at `/config/secrets/mcpx-bearer-token`, renders the active MCPX config with that token, and sets tunnel-client MCP runtime/discovery headers to `Authorization: Bearer <token>` automatically. Both the active config and token file are created with private file permissions where the mounted filesystem permits it.
 
-Harbor never overwrites an existing config. To override the default, create on the host:
+The token is internal to the container-to-MCP hop. tunnel-client's static MCP headers are scoped to the configured MCP server origin and are not sent to the OpenAI control plane. Harbor uses both `MCP_EXTRA_HEADERS` and `MCP_DISCOVERY_EXTRA_HEADERS` so ordinary MCP requests and startup/discovery probes authenticate consistently.
+
+Harbor never overwrites an unrelated custom config. It also migrates the exact legacy Harbor open-auth default to the new bearer-protected default. To override Harbor's managed default, create on the host:
 
 `<harbor-config>/mcpx/config.yaml`
 
@@ -47,7 +49,8 @@ server:
   port: 9090
 
 auth:
-  mode: open
+  mode: bearer
+  token: "replace-with-your-own-private-token"
 
 workspaces:
   - name: workspace
@@ -72,19 +75,81 @@ security:
 
 `MCPX_HOME=/config/mcpx`, so MCPX state and the active config remain persistent. Project-level `.mcpx.yaml` can further narrow a specific workspace.
 
-## Prepare the OpenAI tunnel
+If your custom config also uses static Bearer auth, set `MCPX_BEARER_TOKEN` to the same token. Harbor will then configure tunnel-client's MCP headers for you without modifying the custom config. If you want full manual control, set `MCP_EXTRA_HEADERS` and `MCP_DISCOVERY_EXTRA_HEADERS` yourself; explicit values are preserved.
 
-Provide these environment variables to the container:
+## Create the OpenAI tunnel and runtime key
+
+Harbor automatically handles the **internal MCPX Bearer token**. You do not create or copy that token into OpenAI. For a normal deployment, you only provide the two OpenAI-side values that tunnel-client requires:
 
 `CONTROL_PLANE_TUNNEL_ID=tunnel_...`
 
-`CONTROL_PLANE_API_KEY=<runtime API key>`
+`CONTROL_PLANE_API_KEY=<restricted runtime API key>`
 
-Harbor already sets:
+Harbor already sets `MCP_SERVER_URL=http://127.0.0.1:9090/mcp` and automatically gives tunnel-client the separate internal MCP Authorization header.
 
-`MCP_SERVER_URL=http://127.0.0.1:9090/mcp`
+### 1. Set the tunnel permissions
 
-Use a runtime credential intended to operate the tunnel; do not bake secrets into the image or repository. The tunnel is outbound from the container, so normal ChatGPT connectivity does not require an inbound router port.
+Open [Organization roles](https://platform.openai.com/settings/organization/people/roles). The identity whose runtime key will run Harbor needs **Tunnels: Read + Use**.
+
+If the same person will also create or edit tunnel records, give that manager **Tunnels: Read + Manage**, plus **Use** if they will also run Harbor or attach the ChatGPT connector.
+
+For larger organizations, OpenAI recommends assigning these roles through [Organization groups](https://platform.openai.com/settings/organization/people/groups).
+
+### 2. Create the tunnel
+
+Open [OpenAI Platform → Tunnels](https://platform.openai.com/settings/organization/tunnels) and create a tunnel. Attach the correct ChatGPT workspace scope if the tunnel must appear in that workspace's connector picker.
+
+Copy the resulting ID. It looks like:
+
+`CONTROL_PLANE_TUNNEL_ID=tunnel_0123456789abcdef0123456789abcdef`
+
+You can also create/manage tunnels with `tunnel-client admin tunnels ...`, but that path requires a separate `OPENAI_ADMIN_KEY`. Harbor does not need an admin key for normal runtime use.
+
+### 3. Create the runtime API key
+
+Open [OpenAI Platform → Runtime API keys](https://platform.openai.com/settings/organization/api-keys).
+
+Create a **Restricted** key for the identity that will run Harbor. Grant **Tunnels: Read + Use**. Do not use an unrestricted `All` key or an admin API key for the long-lived Harbor runtime.
+
+Save the new key as:
+
+`CONTROL_PLANE_API_KEY=<your runtime key>`
+
+The key's principal must also have permission to use the target tunnel; creating a key alone does not grant tunnel access.
+
+### 4. Configure Harbor
+
+Set only these OpenAI tunnel variables in TrueNAS/Docker:
+
+```text
+CONTROL_PLANE_TUNNEL_ID=tunnel_...
+CONTROL_PLANE_API_KEY=<restricted runtime API key>
+```
+
+On first normal tunnel-enabled startup, Harbor automatically:
+
+1. creates a persistent random MCPX Bearer token;
+2. stores it under `/config/secrets/mcpx-bearer-token`;
+3. configures MCPX `auth.mode: bearer` with that token;
+4. configures tunnel-client's MCP runtime requests with `Authorization: Bearer ...`;
+5. configures tunnel-client's MCP discovery/initialize probe with the same header.
+
+You therefore do **not** need a third MCP token setting for the default Harbor configuration.
+
+### 5. Attach ChatGPT to the same tunnel
+
+Open [ChatGPT → Connectors](https://chatgpt.com/#settings/Connectors), add/configure the connector with **Connection: Tunnel**, then select or paste the same tunnel ID used by Harbor.
+
+If the tunnel does not appear, verify its ChatGPT workspace scope and that the connector operator has **Tunnels: Use**.
+
+### Official tunnel-client references
+
+- [Tunnel end-user guide](https://github.com/openai/tunnel-client/blob/master/docs/end-user-guide.md)
+- [Permissions, roles, tunnel IDs, and API keys](https://github.com/openai/tunnel-client/blob/master/docs/permissions.md)
+- [Tunnel-client configuration reference](https://github.com/openai/tunnel-client/blob/master/docs/configuration.md)
+- [Deployment and network requirements](https://github.com/openai/tunnel-client/blob/master/docs/deployment/overview.md)
+
+Use a runtime credential intended to operate the tunnel; do not bake OpenAI secrets into the image or repository. The tunnel uses outbound HTTPS to OpenAI, so normal ChatGPT connectivity does not require an inbound router port.
 
 ## Deploy on TrueNAS SCALE
 
@@ -156,6 +221,7 @@ Typical failures:
 | API key required | `CONTROL_PLANE_API_KEY` is set |
 | tunnel ID required | `CONTROL_PLANE_TUNNEL_ID` is set correctly |
 | tunnel alive but not ready | inspect MCPX startup and tunnel readiness/logs |
+| MCP initialize/probe returns 401 | with Harbor's managed config, verify `/config/secrets/mcpx-bearer-token` and the managed config remain paired; with a custom Bearer config, set matching `MCPX_BEARER_TOKEN` or explicit MCP header env vars |
 | ChatGPT sees no tools | verify tunnel readiness and MCPX workspace registration |
 
 Print bundled versions:
@@ -186,7 +252,7 @@ Use the default safely by keeping the container boundary narrow:
 - Mount only the intended project at `/workspace` and Harbor state at `/config`; do not mount the host root, unrelated datasets, SSH key directories, or other sensitive paths.
 - Keep privileged mode off and do not mount the Docker socket or host `/dev`.
 - Keep host networking off for normal use. MCPX listens on `127.0.0.1` inside the container and Secure MCP Tunnel uses outbound connectivity, so no public MCP port is required.
-- Keep `/config` private and persistent; never commit tunnel/API/MCPX credentials.
+- Keep `/config` private and persistent; it contains the generated MCP Bearer token as well as tunnel/MCPX state. Never commit tunnel/API/MCPX credentials.
 - Treat write access to `/workspace` as real developer access: keep source control and backups available for anything important.
 - If multiple users share the tunnel, or the mounted project contains sensitive material, replace `/config/mcpx/config.yaml` with a restrictive policy before exposing the connector.
 

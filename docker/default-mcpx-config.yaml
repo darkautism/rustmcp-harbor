@@ -1,10 +1,11 @@
+# rustmcp-harbor-managed-config-v2
 server:
   host: 127.0.0.1
   port: 9090
 
 auth:
-  mode: open
-  token: ""
+  mode: bearer
+  token: "__RUSTMCP_HARBOR_BEARER_TOKEN__"
 
 workspaces:
   - name: workspace

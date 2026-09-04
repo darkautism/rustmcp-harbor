@@ -23,18 +23,40 @@ fi
 : "${TUNNEL_CLIENT_PROFILE_DIR:=/config/tunnel}"
 : "${TUNNEL_CLIENT_STATE_DIR:=/config/tunnel/state}"
 : "${MCP_SERVER_URL:=http://127.0.0.1:9090/mcp}"
+: "${RUSTMCP_HARBOR_DEFAULT_MCPX_CONFIG:=/usr/share/rustmcp-harbor/default-mcpx-config.yaml}"
+
+mkdir -p "${MCPX_HOME}" "${TUNNEL_CLIENT_PROFILE_DIR}" "${TUNNEL_CLIENT_STATE_DIR}"
+
+tunnel_requested=0
+if [[ -n "${TUNNEL_CLIENT_CONFIG:-}" \
+   || -n "${TUNNEL_CLIENT_PROFILE:-}" \
+   || -n "${TUNNEL_CLIENT_PROFILE_FILE:-}" \
+   || -f /config/tunnel/profile.yaml \
+   || ( -n "${CONTROL_PLANE_TUNNEL_ID:-}" && -n "${CONTROL_PLANE_API_KEY:-}" ) ]]; then
+    tunnel_requested=1
+fi
 
 if [[ ! -f "${MCPX_HOME}/config.yaml" ]]; then
-    cat >&2 <<EOF_CONFIG
+    if (( tunnel_requested == 1 )); then
+        install -m 0644 "${RUSTMCP_HARBOR_DEFAULT_MCPX_CONFIG}" "${MCPX_HOME}/config.yaml"
+        echo "No custom MCPX config mounted; installed Harbor's allow-all default at ${MCPX_HOME}/config.yaml." >&2
+        echo "Override it by mounting your own /config/mcpx/config.yaml before startup." >&2
+    else
+        cat >&2 <<EOF_CONFIG
 MCPX config is not mounted.
 Expected: ${MCPX_HOME}/config.yaml
 
-Mount one persistent host directory at /config and place your MCPX config at:
-  /config/mcpx/config.yaml
-
 RustMCP Harbor intentionally ships with no default MCPX configuration.
+No active config exists in /config for this no-tunnel startup. A bundled allow-all
+template is available at:
+  ${RUSTMCP_HARBOR_DEFAULT_MCPX_CONFIG}
+
+For normal Secure MCP Tunnel startup, provide tunnel settings and Harbor will copy
+that template to /config/mcpx/config.yaml automatically. Mount your own config there
+to override the default.
 EOF_CONFIG
-    exit 64
+        exit 64
+    fi
 fi
 
 cd /workspace

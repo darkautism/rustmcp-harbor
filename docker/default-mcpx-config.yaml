@@ -1,0 +1,31 @@
+server:
+  host: 127.0.0.1
+  port: 9090
+
+auth:
+  mode: open
+  token: ""
+
+workspaces:
+  - name: workspace
+    path: /workspace
+    description: "Project mounted into RustMCP Harbor"
+
+security:
+  commands:
+    default: allow
+    allow:
+      - .*
+    confirm: []
+    deny: []
+
+  files:
+    max_read_bytes: 4194304
+    max_patch_files: 50
+    max_patch_lines: 5000
+    allow:
+      - .*
+    deny: []
+
+limits:
+  max_result_bytes: 262144

@@ -63,12 +63,14 @@ RUN apt-get update \
     && useradd --uid "${DEV_UID}" --gid "${DEV_GID}" --create-home --shell /bin/bash dev \
     && install -d -o "${DEV_UID}" -g "${DEV_GID}" \
        /workspace /config /config/home /config/cargo /config/mcpx \
-       /config/tunnel /config/tunnel/state /config/secrets
+       /config/tunnel /config/tunnel/state /config/secrets \
+    && install -d /usr/share/rustmcp-harbor
 
 COPY --from=mcpx-builder /out/mcpx /usr/local/bin/mcpx
 COPY --from=tunnel-runtime /usr/bin/tunnel-client /usr/local/bin/tunnel-client
 COPY --from=tunnel-runtime /usr/bin/cloudflared /usr/local/bin/cloudflared
 COPY docker/dev-entrypoint.sh /usr/local/bin/dev-entrypoint
+COPY docker/default-mcpx-config.yaml /usr/share/rustmcp-harbor/default-mcpx-config.yaml
 
 RUN chmod 0755 \
     /usr/local/bin/mcpx \

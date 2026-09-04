@@ -2,7 +2,7 @@
 
 RustMCP Harbor is a reusable Rust development container that runs **Rust + MCPX + OpenAI Secure MCP Tunnel** beside any project on TrueNAS SCALE or another Docker host.
 
-It contains no project, no MCPX config, no tunnel ID, and no credentials. Mount your project at `/workspace` and persistent private state at `/config`.
+It contains no project, tunnel ID, or credentials. Mount your project at `/workspace` and persistent private state at `/config`. Harbor includes a bundled MCPX allow-all default for normal tunnel-enabled startup; a user-supplied `/config/mcpx/config.yaml` always overrides it.
 
 ## Image
 
@@ -23,17 +23,54 @@ The container runs as UID/GID `568:568` by default, which matches the default Tr
 
 Do not enable privileged mode, host networking, `/dev`, or the Docker socket just to use Secure MCP Tunnel.
 
-## Prepare MCPX
+## MCPX default and override
 
-Harbor intentionally ships with no default MCPX config. Create on the host:
+Harbor bundles this template inside the image:
+
+`/usr/share/rustmcp-harbor/default-mcpx-config.yaml`
+
+The bundled template registers `/workspace` and is intentionally **allow-all** for MCPX file access and terminal commands. During normal Secure MCP Tunnel startup, if `/config/mcpx/config.yaml` does not exist, the entrypoint copies the bundled template there. Because `/config` is persistent, that generated file can then be edited normally.
+
+Harbor never overwrites an existing config. To override the default, create on the host:
 
 `<harbor-config>/mcpx/config.yaml`
 
-It appears inside the container as:
+and mount the Harbor config dataset at `/config`. The file then appears as:
 
 `/config/mcpx/config.yaml`
 
-Harbor sets `MCPX_HOME=/config/mcpx`, so MCPX runtime state is persistent. Projects inside the container live at `/workspace`.
+For example, a more restrictive override can require confirmation by default and allow only selected read-only commands:
+
+```yaml
+server:
+  host: 127.0.0.1
+  port: 9090
+
+auth:
+  mode: open
+
+workspaces:
+  - name: workspace
+    path: /workspace
+
+security:
+  commands:
+    default: confirm
+    allow:
+      - ^git status$
+      - ^git diff
+    deny: []
+  files:
+    max_read_bytes: 4194304
+    max_patch_files: 20
+    max_patch_lines: 2000
+    allow:
+      - ^src/
+      - ^Cargo\.toml$
+      - ^Cargo\.lock$
+```
+
+`MCPX_HOME=/config/mcpx`, so MCPX state and the active config remain persistent. Project-level `.mcpx.yaml` can further narrow a specific workspace.
 
 ## Prepare the OpenAI tunnel
 
@@ -74,7 +111,7 @@ Add environment variables:
 
 `CONTROL_PLANE_API_KEY=<runtime API key>`
 
-You normally do **not** need to publish container ports 9090 or 8080. Before starting, verify that the host file `<harbor-config>/mcpx/config.yaml` exists and UID/GID 568 can read and write both mounted datasets.
+You normally do **not** need to publish container ports 9090 or 8080. UID/GID 568 must be able to read and write both mounted datasets. You may pre-create `<harbor-config>/mcpx/config.yaml`; if you omit it, normal tunnel-enabled startup installs Harbor's bundled allow-all default automatically.
 
 Save/install the Custom App, then inspect its logs. MCPX should start first; tunnel-client starts after MCPX becomes reachable.
 
@@ -115,7 +152,7 @@ Typical failures:
 
 | Message/symptom | Check |
 | --- | --- |
-| MCPX config is not mounted | `/config/mcpx/config.yaml` exists and permissions allow UID 568 |
+| MCPX config is not mounted | supply tunnel settings so Harbor can install its bundled default, or mount your own `/config/mcpx/config.yaml`; verify UID 568 can write `/config` |
 | API key required | `CONTROL_PLANE_API_KEY` is set |
 | tunnel ID required | `CONTROL_PLANE_TUNNEL_ID` is set correctly |
 | tunnel alive but not ready | inspect MCPX startup and tunnel readiness/logs |
@@ -139,10 +176,18 @@ Use the dated `weekly-YYYYMMDD` or `sha-...` tag when you want a reproducible de
 
 Harbor sets `RUSTUP_TOOLCHAIN=stable`, so projects use the stable toolchain contained in that week's image. Unset it if a project must honor its own `rust-toolchain.toml`.
 
-## Security
+## Security model
 
-- Runs non-root as 568:568 by default.
-- Secure MCP Tunnel uses outbound connectivity; no public MCP port is required.
-- Keep `/config` private and persistent.
-- Never commit tunnel/API/MCPX credentials.
-- MCPX policy still controls what remote ChatGPT/Codex sessions may execute or edit in the mounted workspace.
+The bundled MCPX config is intentionally permissive. Its safety boundary is the **container**, not a restrictive MCPX allowlist. With the default config, a connected owner/editor can read and modify files in the registered `/workspace` and run commands as the container user.
+
+Use the default safely by keeping the container boundary narrow:
+
+- Runs non-root as UID/GID `568:568` by default.
+- Mount only the intended project at `/workspace` and Harbor state at `/config`; do not mount the host root, unrelated datasets, SSH key directories, or other sensitive paths.
+- Keep privileged mode off and do not mount the Docker socket or host `/dev`.
+- Keep host networking off for normal use. MCPX listens on `127.0.0.1` inside the container and Secure MCP Tunnel uses outbound connectivity, so no public MCP port is required.
+- Keep `/config` private and persistent; never commit tunnel/API/MCPX credentials.
+- Treat write access to `/workspace` as real developer access: keep source control and backups available for anything important.
+- If multiple users share the tunnel, or the mounted project contains sensitive material, replace `/config/mcpx/config.yaml` with a restrictive policy before exposing the connector.
+
+The bundled default is optimized for a dedicated development container where `/workspace` is the deliberate trust boundary. It is not a production sandbox for arbitrary host files.

@@ -64,7 +64,9 @@ RUN apt-get update \
     && install -d -o "${DEV_UID}" -g "${DEV_GID}" \
        /workspace /config /config/home /config/cargo /config/mcpx \
        /config/tunnel /config/tunnel/state /config/secrets \
-    && install -d /usr/share/rustmcp-harbor
+    && install -d /usr/share/rustmcp-harbor \
+    && printf '%s\n' 'export PATH="/config/cargo/bin:/usr/local/cargo/bin:$PATH"' > /etc/profile.d/rustmcp-harbor-path.sh \
+    && chmod 0644 /etc/profile.d/rustmcp-harbor-path.sh
 
 COPY --from=mcpx-builder /out/mcpx /usr/local/bin/mcpx
 COPY --from=tunnel-runtime /usr/bin/tunnel-client /usr/local/bin/tunnel-client
@@ -80,6 +82,7 @@ RUN chmod 0755 \
 
 ENV HOME=/config/home \
     CARGO_HOME=/config/cargo \
+    PATH=/config/cargo/bin:/usr/local/cargo/bin:${PATH} \
     MCPX_HOME=/config/mcpx \
     TUNNEL_CLIENT_PROFILE_DIR=/config/tunnel \
     TUNNEL_CLIENT_STATE_DIR=/config/tunnel/state \

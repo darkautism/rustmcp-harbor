@@ -104,6 +104,7 @@ jobs:
           for platform in linux/amd64 linux/arm64; do
             echo "Smoke testing ${platform}"
             docker run --rm --platform "${platform}" "${IMAGE}:latest" versions
+            docker run --rm --platform "${platform}" --entrypoint /bin/bash "${IMAGE}:latest" -lc 'command -v cargo && command -v rustup && cargo --version && rustup --version'
             uid="$(docker run --rm --platform "${platform}" --entrypoint /usr/bin/id "${IMAGE}:latest" -u)"
             test "${uid}" = "568"
           done

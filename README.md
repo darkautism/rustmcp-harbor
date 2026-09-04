@@ -75,6 +75,8 @@ security:
 
 `MCPX_HOME=/config/mcpx`, so MCPX state and the active config remain persistent. Project-level `.mcpx.yaml` can further narrow a specific workspace.
 
+Harbor keeps Rust tooling on the command PATH for MCPX login-shell execution. `/usr/local/cargo/bin` contains the image's bundled `cargo`/`rustup` proxies, while `/config/cargo/bin` holds persistent binaries installed with `cargo install`; both are prepended through the image environment and `/etc/profile.d/rustmcp-harbor-path.sh`. MCPX executes Unix command strings through `bash -lc`, whose login startup can otherwise replace the image PATH.
+
 If your custom config also uses static Bearer auth, set `MCPX_BEARER_TOKEN` to the same token. Harbor will then configure tunnel-client's MCP headers for you without modifying the custom config. If you want full manual control, set `MCP_EXTRA_HEADERS` and `MCP_DISCOVERY_EXTRA_HEADERS` yourself; explicit values are preserved.
 
 ## Create the OpenAI tunnel and runtime key

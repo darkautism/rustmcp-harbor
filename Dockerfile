@@ -36,7 +36,9 @@ RUN apt-get update \
        cmake \
        curl \
        file \
+       gh \
        git \
+       git-lfs \
        jq \
        libasound2-dev \
        libegl1-mesa-dev \

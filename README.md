@@ -77,6 +77,8 @@ security:
 
 Harbor keeps Rust tooling on the command PATH for MCPX login-shell execution. `/usr/local/cargo/bin` contains the image's bundled `cargo`/`rustup` proxies, while `/config/cargo/bin` holds persistent binaries installed with `cargo install`; both are prepended through the image environment and `/etc/profile.d/rustmcp-harbor-path.sh`. MCPX executes Unix command strings through `bash -lc`, whose login startup can otherwise replace the image PATH.
 
+GitHub CLI (`gh`) and Git LFS (`git-lfs`) are included for repository, pull-request, Actions, issue, release, and large-file workflows. Authenticate `gh` normally with `gh auth login`, or provide `GH_TOKEN` when non-interactive authentication is more convenient. Git LFS repositories can use the normal `git lfs install`, `git lfs pull`, and `git lfs push` commands. Because the default MCPX profile permits terminal commands, credentials made available inside the container should be treated as credentials available to the MCPX operator.
+
 If your custom config also uses static Bearer auth, set `MCPX_BEARER_TOKEN` to the same token. Harbor will then configure tunnel-client's MCP headers for you without modifying the custom config. If you want full manual control, set `MCP_EXTRA_HEADERS` and `MCP_DISCOVERY_EXTRA_HEADERS` yourself; explicit values are preserved.
 
 ## Create the OpenAI tunnel and runtime key

@@ -244,7 +244,7 @@ Use the dated `weekly-YYYYMMDD` or `sha-...` tag when you want a reproducible de
 
 ## Rust toolchain
 
-Harbor sets `RUSTUP_TOOLCHAIN=stable`, so projects use the stable toolchain contained in that week's image. Unset it if a project must honor its own `rust-toolchain.toml`.
+Harbor does not override `RUSTUP_TOOLCHAIN`. By default it uses the toolchain selected by the upstream `rust:latest` image, while a project's `rust-toolchain.toml` or normal rustup overrides remain effective.
 
 ## Security model
 

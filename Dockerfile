@@ -89,7 +89,6 @@ ENV HOME=/config/home \
     TUNNEL_CLIENT_PROFILE_DIR=/config/tunnel \
     TUNNEL_CLIENT_STATE_DIR=/config/tunnel/state \
     MCP_SERVER_URL=http://127.0.0.1:9090/mcp \
-    RUSTUP_TOOLCHAIN=stable \
     RUST_BACKTRACE=1
 
 WORKDIR /workspace

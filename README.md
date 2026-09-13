@@ -23,6 +23,8 @@ The container runs as UID/GID `568:568` by default, which matches the default Tr
 
 Do not enable privileged mode, host networking, `/dev`, or the Docker socket just to use Secure MCP Tunnel.
 
+The image includes Mesa DRI/Vulkan runtime support and `vulkaninfo`. On amd64 this provides the Mesa Intel Vulkan driver used by Intel integrated graphics. Hardware rendering still requires exposing the GPU render device to the container (normally `/dev/dri`, or the equivalent TrueNAS GPU allocation) and granting the container user access to that render node; do not expose the entire host `/dev`.
+
 ## MCPX default and override
 
 Harbor bundles this template inside the image:
@@ -181,6 +183,8 @@ Add environment variables:
 `CONTROL_PLANE_API_KEY=<runtime API key>`
 
 You normally do **not** need to publish container ports 9090 or 8080. UID/GID 568 must be able to read and write both mounted datasets. You may pre-create `<harbor-config>/mcpx/config.yaml`; if you omit it, normal tunnel-enabled startup installs Harbor's bundled allow-all default automatically.
+
+For Bevy/wgpu hardware rendering on an Intel iGPU, assign the GPU to the app so the container receives `/dev/dri` (especially the `renderD*` node). Harbor already contains the Mesa Vulkan/DRI userspace drivers; the remaining requirement is device access and matching render-node permissions.
 
 Save/install the Custom App, then inspect its logs. MCPX should start first; tunnel-client starts after MCPX becomes reachable.
 

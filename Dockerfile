@@ -43,7 +43,9 @@ RUN apt-get update \
        libasound2-dev \
        libegl1-mesa-dev \
        libgl1-mesa-dev \
+       libgl1-mesa-dri \
        libssl-dev \
+       libvulkan1 \
        libudev-dev \
        libwayland-dev \
        libx11-dev \
@@ -55,10 +57,12 @@ RUN apt-get update \
        libxkbcommon-x11-dev \
        libxrandr-dev \
        lld \
+       mesa-vulkan-drivers \
        openssh-client \
        pkg-config \
        tini \
        tmux \
+       vulkan-tools \
     && rm -rf /var/lib/apt/lists/* \
     && rustup component add clippy rustfmt \
     && groupadd --gid "${DEV_GID}" dev \

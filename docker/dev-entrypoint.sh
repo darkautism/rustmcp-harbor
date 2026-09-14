@@ -4,6 +4,10 @@ set -Eeuo pipefail
 print_versions() {
     rustc --version
     cargo --version
+    rg --version
+    cargo expand --version
+    cargo bloat --version
+    cargo nextest --version
     mcpx -version
 }
 

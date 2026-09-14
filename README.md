@@ -12,6 +12,8 @@ GitHub Actions rebuilds the image weekly and when container files change. The im
 
 The image includes the Rust toolchain, MCPX, `gh`, Git LFS, common native build dependencies, and Mesa DRI/Vulkan runtime support with `vulkaninfo`.
 
+Fast-path development tools include `rg` (ripgrep), `cargo expand`, `cargo bloat`, and `cargo nextest`. `cargo-nextest` is installed from its official prebuilt release for amd64/arm64 rather than compiled from source.
+
 Rust binaries remain available to MCPX login shells through both `/usr/local/cargo/bin` and the persistent `/config/cargo/bin` path.
 
 For Bevy/wgpu hardware rendering, pass the appropriate GPU render device into the container and grant UID/GID `568:568` access to it. Do not expose the entire host `/dev`.

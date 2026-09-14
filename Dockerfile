@@ -19,6 +19,7 @@ RUN mkdir -p /out \
        go build -trimpath -o /out/mcpx ./cmd/mcpx-server
 
 FROM ${RUST_IMAGE} AS runtime
+ARG TARGETARCH
 ARG DEV_UID=568
 ARG DEV_GID=568
 
@@ -55,11 +56,20 @@ RUN apt-get update \
        mesa-vulkan-drivers \
        openssh-client \
        pkg-config \
+       ripgrep \
        tini \
        tmux \
        vulkan-tools \
     && rm -rf /var/lib/apt/lists/* \
     && rustup component add clippy rustfmt \
+    && cargo install --locked cargo-expand \
+    && cargo install --locked cargo-bloat \
+    && case "${TARGETARCH}" in \
+         amd64) NEXTEST_URL="https://get.nexte.st/latest/linux" ;; \
+         arm64) NEXTEST_URL="https://get.nexte.st/latest/linux-arm" ;; \
+         *) echo "unsupported TARGETARCH for cargo-nextest: ${TARGETARCH}" >&2; exit 1 ;; \
+       esac \
+    && curl -LsSf "${NEXTEST_URL}" | tar zxf - -C /usr/local/cargo/bin \
     && groupadd --gid "${DEV_GID}" dev \
     && useradd --uid "${DEV_UID}" --gid "${DEV_GID}" --create-home --shell /bin/bash dev \
     && install -d -o "${DEV_UID}" -g "${DEV_GID}" \

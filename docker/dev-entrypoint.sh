@@ -44,12 +44,12 @@ render_default_mcpx_config() {
     if grep -Fq '__OAUTH__' "${RUSTMCP_HARBOR_DEFAULT_MCPX_CONFIG}" \
        && [[ -z "${oauth_password}" ]]; then
         echo "MCPX_OAUTH_PASSWORD is required by the bundled MCPX config template." >&2
-        return 1
+        return 64
     fi
     if grep -Fq '__HOSTNAME__' "${RUSTMCP_HARBOR_DEFAULT_MCPX_CONFIG}" \
        && [[ -z "${server_url}" ]]; then
         echo "MCPX_SERVER_URL is required by the bundled MCPX config template (for example https://kpc.myvnc.com)." >&2
-        return 1
+        return 64
     fi
 
     escaped_bind_host="$(yaml_double_quote_escape "${bind_host}")"

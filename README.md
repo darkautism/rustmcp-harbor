@@ -1,194 +1,125 @@
 # RustMCP Harbor
 
-RustMCP Harbor is a reusable Rust development container that runs **Rust + MCPX + OpenAI Secure MCP Tunnel** beside any project on TrueNAS SCALE or another Docker host.
-
-It contains no project, tunnel ID, or OpenAI credential. Mount your project at `/workspace` and persistent private state at `/config`. For the default path, Harbor automatically generates and persists an internal MCPX Bearer token, configures MCPX to require it, and configures tunnel-client to send it. You do not need to create a separate MCP token.
+RustMCP Harbor is a reusable **Rust + MCPX** development container for TrueNAS SCALE and other Docker hosts. Mount a project at `/workspace`, expose MCPX only to a trusted reverse proxy, and publish it through your own HTTPS endpoint.
 
 ## Image
 
 `ghcr.io/darkautism/rustmcp-harbor:latest`
 
-GitHub Actions rebuilds the image every Monday and on container changes. Each build pulls current `rust:latest`, current MCPX source, and OpenAI's current stable `ghcr.io/openai/tunnel-client:latest`, then publishes `linux/amd64` and `linux/arm64` and smoke-tests both architectures.
+GitHub Actions rebuilds the image weekly and when container files change. The image is published for `linux/amd64` and `linux/arm64`.
 
-## What you need
+## Included tooling
 
-Two persistent mounts are enough:
+The image includes the Rust toolchain, MCPX, `gh`, Git LFS, common native build dependencies, and Mesa DRI/Vulkan runtime support with `vulkaninfo`.
 
-| Host data | Container path | Purpose |
-| --- | --- | --- |
-| your project | `/workspace` | source code MCPX manages |
-| private Harbor data | `/config` | MCPX config/state, Cargo cache, tunnel state and secrets |
+Rust binaries remain available to MCPX login shells through both `/usr/local/cargo/bin` and the persistent `/config/cargo/bin` path.
 
-The container runs as UID/GID `568:568` by default, which matches the default TrueNAS Apps custom-user IDs. Give that identity read/write permission on both datasets.
+For Bevy/wgpu hardware rendering, pass the appropriate GPU render device into the container and grant UID/GID `568:568` access to it. Do not expose the entire host `/dev`.
 
-Do not enable privileged mode, host networking, `/dev`, or the Docker socket just to use Secure MCP Tunnel.
+## Minimal deployment
 
-The image includes Mesa DRI/Vulkan runtime support and `vulkaninfo`. On amd64 this provides the Mesa Intel Vulkan driver used by Intel integrated graphics. Hardware rendering still requires exposing the GPU render device to the container (normally `/dev/dri`, or the equivalent TrueNAS GPU allocation) and granting the container user access to that render node; do not expose the entire host `/dev`.
-
-## MCPX default and override
-
-Harbor bundles this template inside the image:
-
-`/usr/share/rustmcp-harbor/default-mcpx-config.yaml`
-
-The bundled template registers `/workspace`, is intentionally **allow-all** for MCPX file access and terminal commands, and uses `auth.mode: bearer`. During normal Secure MCP Tunnel startup, if `/config/mcpx/config.yaml` does not exist, Harbor generates a cryptographically random 256-bit token, stores it at `/config/secrets/mcpx-bearer-token`, renders the active MCPX config with that token, and sets tunnel-client MCP runtime/discovery headers to `Authorization: Bearer <token>` automatically. Both the active config and token file are created with private file permissions where the mounted filesystem permits it.
-
-The token is internal to the container-to-MCP hop. tunnel-client's static MCP headers are scoped to the configured MCP server origin and are not sent to the OpenAI control plane. Harbor uses both `MCP_EXTRA_HEADERS` and `MCP_DISCOVERY_EXTRA_HEADERS` so ordinary MCP requests and startup/discovery probes authenticate consistently.
-
-Harbor never overwrites an unrelated custom config. It also migrates the exact legacy Harbor open-auth default to the new bearer-protected default. To override Harbor's managed default, create on the host:
-
-`<harbor-config>/mcpx/config.yaml`
-
-and mount the Harbor config dataset at `/config`. The file then appears as:
-
-`/config/mcpx/config.yaml`
-
-For example, a more restrictive override can require confirmation by default and allow only selected read-only commands:
-
-```yaml
-server:
-  host: 127.0.0.1
-  port: 9090
-
-auth:
-  mode: bearer
-  token: "replace-with-your-own-private-token"
-
-workspaces:
-  - name: workspace
-    path: /workspace
-
-security:
-  commands:
-    default: confirm
-    allow:
-      - ^git status$
-      - ^git diff
-    deny: []
-  files:
-    max_read_bytes: 4194304
-    max_patch_files: 20
-    max_patch_lines: 2000
-    allow:
-      - ^src/
-      - ^Cargo\.toml$
-      - ^Cargo\.lock$
-```
-
-`MCPX_HOME=/config/mcpx`, so MCPX state and the active config remain persistent. Project-level `.mcpx.yaml` can further narrow a specific workspace.
-
-Harbor keeps Rust tooling on the command PATH for MCPX login-shell execution. `/usr/local/cargo/bin` contains the image's bundled `cargo`/`rustup` proxies, while `/config/cargo/bin` holds persistent binaries installed with `cargo install`; both are prepended through the image environment and `/etc/profile.d/rustmcp-harbor-path.sh`. MCPX executes Unix command strings through `bash -lc`, whose login startup can otherwise replace the image PATH.
-
-GitHub CLI (`gh`) and Git LFS (`git-lfs`) are included for repository, pull-request, Actions, issue, release, and large-file workflows. Authenticate `gh` normally with `gh auth login`, or provide `GH_TOKEN` when non-interactive authentication is more convenient. Git LFS repositories can use the normal `git lfs install`, `git lfs pull`, and `git lfs push` commands. Because the default MCPX profile permits terminal commands, credentials made available inside the container should be treated as credentials available to the MCPX operator.
-
-If your custom config also uses static Bearer auth, set `MCPX_BEARER_TOKEN` to the same token. Harbor will then configure tunnel-client's MCP headers for you without modifying the custom config. If you want full manual control, set `MCP_EXTRA_HEADERS` and `MCP_DISCOVERY_EXTRA_HEADERS` yourself; explicit values are preserved.
-
-## Create the OpenAI tunnel and runtime key
-
-Harbor automatically handles the **internal MCPX Bearer token**. You do not create or copy that token into OpenAI. For a normal deployment, you only provide the two OpenAI-side values that tunnel-client requires:
-
-`CONTROL_PLANE_TUNNEL_ID=tunnel_...`
-
-`CONTROL_PLANE_API_KEY=<restricted runtime API key>`
-
-Harbor already sets `MCP_SERVER_URL=http://127.0.0.1:9090/mcp` and automatically gives tunnel-client the separate internal MCP Authorization header.
-
-### 1. Set the tunnel permissions
-
-Open [Organization roles](https://platform.openai.com/settings/organization/people/roles). The identity whose runtime key will run Harbor needs **Tunnels: Read + Use**.
-
-If the same person will also create or edit tunnel records, give that manager **Tunnels: Read + Manage**, plus **Use** if they will also run Harbor or attach the ChatGPT connector.
-
-For larger organizations, OpenAI recommends assigning these roles through [Organization groups](https://platform.openai.com/settings/organization/people/groups).
-
-### 2. Create the tunnel
-
-Open [OpenAI Platform → Tunnels](https://platform.openai.com/settings/organization/tunnels) and create a tunnel. Attach the correct ChatGPT workspace scope if the tunnel must appear in that workspace's connector picker.
-
-Copy the resulting ID. It looks like:
-
-`CONTROL_PLANE_TUNNEL_ID=tunnel_0123456789abcdef0123456789abcdef`
-
-You can also create/manage tunnels with `tunnel-client admin tunnels ...`, but that path requires a separate `OPENAI_ADMIN_KEY`. Harbor does not need an admin key for normal runtime use.
-
-### 3. Create the runtime API key
-
-Open [OpenAI Platform → Runtime API keys](https://platform.openai.com/settings/organization/api-keys).
-
-Create a **Restricted** key for the identity that will run Harbor. Grant **Tunnels: Read + Use**. Do not use an unrestricted `All` key or an admin API key for the long-lived Harbor runtime.
-
-Save the new key as:
-
-`CONTROL_PLANE_API_KEY=<your runtime key>`
-
-The key's principal must also have permission to use the target tunnel; creating a key alone does not grant tunnel access.
-
-### 4. Configure Harbor
-
-Set only these OpenAI tunnel variables in TrueNAS/Docker:
+The only host mount required for normal use is the project:
 
 ```text
-CONTROL_PLANE_TUNNEL_ID=tunnel_...
-CONTROL_PLANE_API_KEY=<restricted runtime API key>
+/mnt/<pool>/<project> -> /workspace
 ```
 
-On first normal tunnel-enabled startup, Harbor automatically:
+The container uses `/config` for Cargo and MCPX state. Mount `/config` only if you want that state to survive replacement of the container; it is not required just to provide an MCPX configuration.
 
-1. creates a persistent random MCPX Bearer token;
-2. stores it under `/config/secrets/mcpx-bearer-token`;
-3. configures MCPX `auth.mode: bearer` with that token;
-4. configures tunnel-client's MCP runtime requests with `Authorization: Bearer ...`;
-5. configures tunnel-client's MCP discovery/initialize probe with the same header.
+The container runs as UID/GID `568:568` by default.
 
-You therefore do **not** need a third MCP token setting for the default Harbor configuration.
+Publish container TCP `9090` to a LAN port that is reachable by your HTTPS reverse proxy. Do **not** port-forward MCPX `9090` directly from the Internet.
 
-### 5. Attach ChatGPT to the same tunnel
+## MCPX configuration
 
-Open [ChatGPT → Connectors](https://chatgpt.com/#settings/Connectors), add/configure the connector with **Connection: Tunnel**, then select or paste the same tunnel ID used by Harbor.
+The bundled template is:
 
-If the tunnel does not appear, verify its ChatGPT workspace scope and that the connector operator has **Tunnels: Use**.
+```text
+/usr/share/rustmcp-harbor/default-mcpx-config.yaml
+```
 
-### Official tunnel-client references
+The entrypoint renders the active file to:
 
-- [Tunnel end-user guide](https://github.com/openai/tunnel-client/blob/master/docs/end-user-guide.md)
-- [Permissions, roles, tunnel IDs, and API keys](https://github.com/openai/tunnel-client/blob/master/docs/permissions.md)
-- [Tunnel-client configuration reference](https://github.com/openai/tunnel-client/blob/master/docs/configuration.md)
-- [Deployment and network requirements](https://github.com/openai/tunnel-client/blob/master/docs/deployment/overview.md)
+```text
+/config/mcpx/config.yaml
+```
 
-Use a runtime credential intended to operate the tunnel; do not bake OpenAI secrets into the image or repository. The tunnel uses outbound HTTPS to OpenAI, so normal ChatGPT connectivity does not require an inbound router port.
+For the bundled OAuth template, set these environment variables:
 
-## Deploy on TrueNAS SCALE
+```text
+MCPX_BIND_HOST=0.0.0.0
+MCPX_SERVER_URL=https://kpc.myvnc.com
+MCPX_OAUTH_PASSWORD=<long-random-password>
+```
 
-In **Apps → Discover Apps → Custom App**, create an app with:
+`MCPX_BIND_HOST` defaults to `0.0.0.0`. In a normal bridged Docker container this is the correct value; the container does not own the TrueNAS host's LAN address.
+
+`MCPX_SERVER_URL` is the public HTTPS origin, without `/mcp`.
+
+When any of those template variables is supplied, the bundled template is rendered again on container startup. This makes TrueNAS environment variables sufficient even when only `/workspace` is mounted.
+
+### Full config override
+
+For complete control, set `MCPX_CONFIG` to the literal YAML configuration. It takes precedence over the bundled template and is written to `/config/mcpx/config.yaml` at startup.
+
+If neither `MCPX_CONFIG` nor template variables are supplied, an existing `/config/mcpx/config.yaml` is kept. If no active config exists, the entrypoint tries to render the bundled template and will fail with a clear error when its required OAuth values are missing.
+
+Project-level `.mcpx.yaml` can still narrow settings for a specific workspace.
+
+## TrueNAS SCALE example
+
+Create a Custom App with approximately these settings:
 
 | Setting | Value |
 | --- | --- |
-| Name | `rustmcp-harbor` |
-| Image repository | `ghcr.io/darkautism/rustmcp-harbor` |
-| Tag | `latest` |
+| Image | `ghcr.io/darkautism/rustmcp-harbor:latest` |
 | Custom User | UID `568`, GID `568` |
 | Privileged | Off |
 | Host Network | Off |
+| Host Path | project dataset → `/workspace` |
+| Port | LAN-only host `9090` → container `9090/TCP` |
 
-Add two **Host Path** mounts:
+Environment variables:
 
-`/mnt/<pool>/<project> -> /workspace`
+```text
+MCPX_BIND_HOST=0.0.0.0
+MCPX_SERVER_URL=https://kautism-nas.myvnc.com
+MCPX_OAUTH_PASSWORD=<long-random-password>
+```
 
-`/mnt/<pool>/<harbor-config> -> /config`
+For an MCPX running behind Caddy on another LAN machine, allow TCP `9090` only from the Caddy host in the machine/firewall policy.
 
-Add environment variables:
+## Caddy example
 
-`CONTROL_PLANE_TUNNEL_ID=tunnel_...`
+Caddy should be the public HTTPS endpoint. MCPX itself stays on the LAN:
 
-`CONTROL_PLANE_API_KEY=<runtime API key>`
+```caddyfile
+kautism-nas.myvnc.com {
+    reverse_proxy 192.168.50.85:9090
+}
+```
 
-You normally do **not** need to publish container ports 9090 or 8080. UID/GID 568 must be able to read and write both mounted datasets. You may pre-create `<harbor-config>/mcpx/config.yaml`; if you omit it, normal tunnel-enabled startup installs Harbor's bundled allow-all default automatically.
+The router exposes only Caddy's public HTTP/HTTPS ports. It should not forward `9090` to MCPX.
 
-For Bevy/wgpu hardware rendering on an Intel iGPU, assign the GPU to the app so the container receives `/dev/dri` (especially the `renderD*` node). Harbor already contains the Mesa Vulkan/DRI userspace drivers; the remaining requirement is device access and matching render-node permissions.
+For several MCP servers, give each one its own hostname and reverse-proxy target:
 
-Save/install the Custom App, then inspect its logs. MCPX should start first; tunnel-client starts after MCPX becomes reachable.
+```caddyfile
+kautism-nas.myvnc.com {
+    reverse_proxy 192.168.50.85:9090
+}
 
-## Docker Compose
+opi16g.myvnc.com {
+    reverse_proxy 192.168.50.86:9090
+}
+
+kpc.myvnc.com {
+    reverse_proxy 192.168.50.87:9090
+}
+```
+
+Each MCPX instance should use its matching public origin as `MCPX_SERVER_URL` and its own OAuth password.
+
+## Docker Compose example
 
 ```yaml
 services:
@@ -196,72 +127,51 @@ services:
     image: ghcr.io/darkautism/rustmcp-harbor:latest
     restart: unless-stopped
     environment:
-      CONTROL_PLANE_TUNNEL_ID: tunnel_0123456789abcdef0123456789abcdef
-      CONTROL_PLANE_API_KEY: ${CONTROL_PLANE_API_KEY}
+      MCPX_BIND_HOST: 0.0.0.0
+      MCPX_SERVER_URL: https://kpc.myvnc.com
+      MCPX_OAUTH_PASSWORD: ${MCPX_OAUTH_PASSWORD}
+    ports:
+      - "9090:9090"
     volumes:
       - /path/to/project:/workspace
-      - /path/to/harbor-config:/config
 ```
 
-Keep the real key in the host environment or another secret store rather than committing it.
+Keep the OAuth password in host environment/secrets rather than committing it.
 
-## Optional tunnel profile
-
-For advanced tunnel-client settings, mount a profile at:
-
-`/config/tunnel/profile.yaml`
-
-The Harbor entrypoint detects it automatically. Native tunnel-client profile/config environment variables remain available.
-
-## Connect ChatGPT
-
-Keep Harbor running, then add/configure the Secure MCP Tunnel connector in ChatGPT using the same tunnel. Complete connector discovery while the container is healthy and ready. MCPX then exposes the workspaces you configured under `/workspace`.
-
-If the tunnel exists but ChatGPT cannot discover tools, check the Harbor logs, MCPX startup, tunnel credentials, and tunnel workspace/permission assignment.
-
-## Health and troubleshooting
-
-Typical failures:
-
-| Message/symptom | Check |
-| --- | --- |
-| MCPX config is not mounted | supply tunnel settings so Harbor can install its bundled default, or mount your own `/config/mcpx/config.yaml`; verify UID 568 can write `/config` |
-| API key required | `CONTROL_PLANE_API_KEY` is set |
-| tunnel ID required | `CONTROL_PLANE_TUNNEL_ID` is set correctly |
-| tunnel alive but not ready | inspect MCPX startup and tunnel readiness/logs |
-| MCP initialize/probe returns 401 | with Harbor's managed config, verify `/config/secrets/mcpx-bearer-token` and the managed config remain paired; with a custom Bearer config, set matching `MCPX_BEARER_TOKEN` or explicit MCP header env vars |
-| ChatGPT sees no tools | verify tunnel readiness and MCPX workspace registration |
+## Useful commands
 
 Print bundled versions:
 
-`docker run --rm ghcr.io/darkautism/rustmcp-harbor:latest versions`
+```bash
+docker run --rm ghcr.io/darkautism/rustmcp-harbor:latest versions
+```
 
-Use Harbor only as a Rust shell/job by supplying an explicit command:
+Use the image as a Rust shell/job by supplying an explicit command:
 
-`docker run --rm -it -v /path/project:/workspace -v /path/config:/config ghcr.io/darkautism/rustmcp-harbor:latest bash`
+```bash
+docker run --rm -it -v /path/project:/workspace ghcr.io/darkautism/rustmcp-harbor:latest bash
+```
 
 ## Updating
 
-The `latest` tag moves after a successful weekly/action build. TrueNAS and Docker do not replace an already-running container automatically just because that tag changed. Pull/update the image and redeploy/recreate the app.
+The `latest` tag moves after a successful scheduled/action build. TrueNAS and Docker do not replace an already-running container automatically; pull the new image and redeploy/recreate the app.
 
-Use the dated `weekly-YYYYMMDD` or `sha-...` tag when you want a reproducible deployment instead of the moving `latest` tag.
-
-## Rust toolchain
-
-Harbor does not override `RUSTUP_TOOLCHAIN`. By default it uses the toolchain selected by the upstream `rust:latest` image, while a project's `rust-toolchain.toml` or normal rustup overrides remain effective.
+Use a dated or SHA tag when you need a reproducible deployment.
 
 ## Security model
 
-The bundled MCPX config is intentionally permissive. Its safety boundary is the **container**, not a restrictive MCPX allowlist. With the default config, a connected owner/editor can read and modify files in the registered `/workspace` and run commands as the container user.
+The bundled MCPX workspace/command policy is intentionally permissive for a dedicated development container. Treat access to MCPX as developer access to the mounted `/workspace`.
 
-Use the default safely by keeping the container boundary narrow:
+Keep the boundary narrow:
 
-- Runs non-root as UID/GID `568:568` by default.
-- Mount only the intended project at `/workspace` and Harbor state at `/config`; do not mount the host root, unrelated datasets, SSH key directories, or other sensitive paths.
-- Keep privileged mode off and do not mount the Docker socket or host `/dev`.
-- Keep host networking off for normal use. MCPX listens on `127.0.0.1` inside the container and Secure MCP Tunnel uses outbound connectivity, so no public MCP port is required.
-- Keep `/config` private and persistent; it contains the generated MCP Bearer token as well as tunnel/MCPX state. Never commit tunnel/API/MCPX credentials.
-- Treat write access to `/workspace` as real developer access: keep source control and backups available for anything important.
-- If multiple users share the tunnel, or the mounted project contains sensitive material, replace `/config/mcpx/config.yaml` with a restrictive policy before exposing the connector.
+- Run as the non-root UID/GID `568:568` user.
+- Mount only the intended project and any deliberately persistent configuration/state.
+- Keep privileged mode off and do not mount the Docker socket or host root.
+- Expose TCP `9090` only to the trusted Caddy/reverse-proxy host; never forward it directly from WAN.
+- Terminate public TLS at Caddy and use MCPX OAuth for the public endpoint.
+- Use a different strong OAuth password for each MCPX instance.
+- Keep `trust_proxy_headers: true` only when direct access to MCPX is restricted to the trusted proxy.
+- Treat credentials available inside the container (`gh`, SSH keys, environment variables, etc.) as available to an MCPX operator because the default command policy allows arbitrary commands.
+- Use a stricter MCPX command/file policy when the workspace or operator population requires a smaller trust boundary.
 
-The bundled default is optimized for a dedicated development container where `/workspace` is the deliberate trust boundary. It is not a production sandbox for arbitrary host files.
+The container is a development environment, not a sandbox for arbitrary untrusted users.

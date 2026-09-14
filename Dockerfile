@@ -2,7 +2,6 @@
 
 ARG GO_IMAGE=golang:latest
 ARG RUST_IMAGE=rust:latest
-ARG TUNNEL_IMAGE=ghcr.io/openai/tunnel-client:latest
 
 FROM --platform=${BUILDPLATFORM} ${GO_IMAGE} AS mcpx-builder
 ARG TARGETOS
@@ -18,10 +17,6 @@ RUN mkdir -p /out \
     && cd /src/mcpx \
     && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
        go build -trimpath -o /out/mcpx ./cmd/mcpx-server
-
-# Follow OpenAI's published stable multi-arch image instead of duplicating its
-# internal UI/Go/cloudflared build pipeline. Weekly --pull builds refresh it.
-FROM --platform=${TARGETPLATFORM} ${TUNNEL_IMAGE} AS tunnel-runtime
 
 FROM ${RUST_IMAGE} AS runtime
 ARG DEV_UID=568
@@ -69,35 +64,27 @@ RUN apt-get update \
     && useradd --uid "${DEV_UID}" --gid "${DEV_GID}" --create-home --shell /bin/bash dev \
     && install -d -o "${DEV_UID}" -g "${DEV_GID}" \
        /workspace /config /config/home /config/cargo /config/mcpx \
-       /config/tunnel /config/tunnel/state /config/secrets \
     && install -d /usr/share/rustmcp-harbor \
     && printf '%s\n' 'export PATH="/config/cargo/bin:/usr/local/cargo/bin:$PATH"' > /etc/profile.d/rustmcp-harbor-path.sh \
     && chmod 0644 /etc/profile.d/rustmcp-harbor-path.sh
 
 COPY --from=mcpx-builder /out/mcpx /usr/local/bin/mcpx
-COPY --from=tunnel-runtime /usr/bin/tunnel-client /usr/local/bin/tunnel-client
-COPY --from=tunnel-runtime /usr/bin/cloudflared /usr/local/bin/cloudflared
 COPY docker/dev-entrypoint.sh /usr/local/bin/dev-entrypoint
 COPY docker/default-mcpx-config.yaml /usr/share/rustmcp-harbor/default-mcpx-config.yaml
 
 RUN chmod 0755 \
     /usr/local/bin/mcpx \
-    /usr/local/bin/tunnel-client \
-    /usr/local/bin/cloudflared \
     /usr/local/bin/dev-entrypoint
 
 ENV HOME=/config/home \
     CARGO_HOME=/config/cargo \
     PATH=/config/cargo/bin:/usr/local/cargo/bin:${PATH} \
     MCPX_HOME=/config/mcpx \
-    TUNNEL_CLIENT_PROFILE_DIR=/config/tunnel \
-    TUNNEL_CLIENT_STATE_DIR=/config/tunnel/state \
-    MCP_SERVER_URL=http://127.0.0.1:9090/mcp \
     RUST_BACKTRACE=1
 
 WORKDIR /workspace
 USER dev:dev
 
-EXPOSE 9090 8080
+EXPOSE 9090
 VOLUME ["/workspace", "/config"]
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/dev-entrypoint"]

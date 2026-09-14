@@ -1,11 +1,21 @@
 # rustmcp-harbor-managed-config-v2
 server:
-  host: 127.0.0.1
-  port: 9090
-
+    host: __HOST_IP__
+    port: 9090
+    disable_localhost_protection: true
+    trust_proxy_headers: true
+    allowed_origins: ["https://chatgpt.com"]
 auth:
-  mode: bearer
-  token: "__RUSTMCP_HARBOR_BEARER_TOKEN__"
+    mode: oauth
+    token: 
+    oauth:
+        password: "__OAUTH__"
+        server_url: "__HOSTNAME__"
+        token_ttl: 86400
+        token_secret: ""
+        client_id: ""
+        client_secret: ""
+        redirect_uris: []
 
 workspaces:
   - name: workspace

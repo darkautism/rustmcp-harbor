@@ -99,19 +99,21 @@ jobs:
           IMAGE: ${{ needs.build.outputs.image }}
         run: |
           set -euo pipefail
-          docker buildx imagetools inspect "${IMAGE}:latest"
+          test_image="${IMAGE}:sha-${GITHUB_SHA}"
+          docker buildx imagetools inspect "${test_image}"
 
           for platform in linux/amd64 linux/arm64; do
             echo "Smoke testing ${platform}"
-            docker run --rm --platform "${platform}" "${IMAGE}:latest" versions
-            docker run --rm --platform "${platform}" --entrypoint /bin/bash "${IMAGE}:latest" -lc 'command -v cargo && command -v rustup && command -v gh && command -v git-lfs && command -v vulkaninfo && cargo --version && rustup --version && gh --version && git lfs version && dpkg-query -W mesa-vulkan-drivers libvulkan1 libgl1-mesa-dri vulkan-tools'
-            uid="$(docker run --rm --platform "${platform}" --entrypoint /usr/bin/id "${IMAGE}:latest" -u)"
+            docker run --rm --platform "${platform}" "${test_image}" versions
+            docker run --rm --platform "${platform}" --entrypoint /bin/bash "${test_image}" -lc 'command -v cargo && command -v rustup && command -v gh && command -v git-lfs && command -v vulkaninfo && cargo --version && rustup --version && gh --version && git lfs version && dpkg-query -W mesa-vulkan-drivers libvulkan1 libgl1-mesa-dri vulkan-tools'
+            uid="$(docker run --rm --platform "${platform}" --entrypoint /usr/bin/id "${test_image}" -u)"
+            echo "${platform} uid=${uid}"
             test "${uid}" = "568"
           done
 
           set +e
-          output="$(docker run --rm --platform linux/amd64 "${IMAGE}:latest" 2>&1)"
+          output="$(docker run --rm --platform linux/amd64 "${test_image}" 2>&1)"
           status=$?
           set -e
           test "${status}" = "64"
-          grep -F "RustMCP Harbor intentionally ships with no default MCPX configuration." <<<"${output}"
+          grep -F "MCPX_OAUTH_PASSWORD is required by the bundled MCPX config template." <<<"${output}"

@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 ARG GO_IMAGE=golang:latest
+ARG NODE_IMAGE=node:24-bookworm-slim
 ARG RUST_IMAGE=rust:latest
 
 FROM --platform=${BUILDPLATFORM} ${GO_IMAGE} AS mcpx-builder
@@ -17,6 +18,10 @@ RUN mkdir -p /out \
     && cd /src/mcpx \
     && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
        go build -trimpath -o /out/mcpx ./cmd/mcpx-server
+
+FROM --platform=${TARGETPLATFORM} ${NODE_IMAGE} AS node-tools
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@latest \
+    && npm install -g @agegr/pi-web@latest
 
 FROM ${RUST_IMAGE} AS runtime
 ARG TARGETARCH
@@ -79,6 +84,12 @@ RUN apt-get update \
     && chmod 0644 /etc/profile.d/rustmcp-harbor-path.sh
 
 COPY --from=mcpx-builder /out/mcpx /usr/local/bin/mcpx
+COPY --from=node-tools /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-tools /usr/local/bin/npm /usr/local/bin/npm
+COPY --from=node-tools /usr/local/bin/npx /usr/local/bin/npx
+COPY --from=node-tools /usr/local/bin/pi /usr/local/bin/pi
+COPY --from=node-tools /usr/local/bin/pi-web /usr/local/bin/pi-web
+COPY --from=node-tools /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY docker/dev-entrypoint.sh /usr/local/bin/dev-entrypoint
 COPY docker/default-mcpx-config.yaml /usr/share/rustmcp-harbor/default-mcpx-config.yaml
 
@@ -90,11 +101,15 @@ ENV HOME=/config/home \
     CARGO_HOME=/config/cargo \
     PATH=/config/cargo/bin:/usr/local/cargo/bin:${PATH} \
     MCPX_HOME=/config/mcpx \
+    PI_WEB_HOSTNAME=0.0.0.0 \
+    PI_WEB_PORT=8080 \
+    PI_WEB_NO_OPEN=1 \
+    PI_WEB_IDLE_TIMEOUT_MS=0 \
     RUST_BACKTRACE=1
 
 WORKDIR /workspace
 USER dev:dev
 
-EXPOSE 9090
+EXPOSE 8080 9090
 VOLUME ["/workspace", "/config"]
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/dev-entrypoint"]

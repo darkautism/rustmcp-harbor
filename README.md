@@ -10,7 +10,9 @@ GitHub Actions rebuilds the image weekly and when container files change. The im
 
 ## Included tooling
 
-The image includes the Rust toolchain, MCPX, `gh`, Git LFS, common native build dependencies, and Mesa DRI/Vulkan runtime support with `vulkaninfo`.
+The image includes the Rust toolchain, MCPX, the Pi coding agent, Pi Web, `gh`, Git LFS, common native build dependencies, and Mesa DRI/Vulkan runtime support with `vulkaninfo`.
+
+Pi is installed from `@earendil-works/pi-coding-agent`; Pi Web is installed from `@agegr/pi-web`. The image includes Node.js 24 so Pi Web satisfies its Node.js >=22.19 requirement.
 
 Fast-path development tools include `rg` (ripgrep), `cargo expand`, `cargo bloat`, and `cargo nextest`. `cargo-nextest` is installed from its official prebuilt release for amd64/arm64 rather than compiled from source.
 
@@ -30,7 +32,9 @@ The container uses `/config` for Cargo and MCPX state. Mount `/config` only if y
 
 The container runs as UID/GID `568:568` by default.
 
-Publish container TCP `9090` to a LAN port that is reachable by your HTTPS reverse proxy. Do **not** port-forward MCPX `9090` directly from the Internet.
+Publish container TCP `9090` to a LAN port that is reachable by your HTTPS reverse proxy. Pi Web listens on container TCP `8080` by default. Do **not** port-forward either service directly from the Internet.
+
+Pi Web starts automatically beside MCPX with `0.0.0.0:8080`, browser auto-open disabled, and idle shutdown disabled. Its Pi state lives under `~/.pi/agent`, which resolves to `/config/home/.pi/agent` in this image. Set `PI_WEB_PASSWORD` when 8080 is reachable beyond a tightly trusted LAN, and terminate public TLS at a reverse proxy or VPN.
 
 ## MCPX configuration
 
@@ -79,7 +83,7 @@ Create a Custom App with approximately these settings:
 | Privileged | Off |
 | Host Network | Off |
 | Host Path | project dataset → `/workspace` |
-| Port | LAN-only host `9090` → container `9090/TCP` |
+| Ports | LAN-only host ports → container `9090/TCP` (MCPX) and `8080/TCP` (Pi Web) |
 
 Environment variables:
 
@@ -133,12 +137,13 @@ services:
       MCPX_SERVER_URL: https://kpc.myvnc.com
       MCPX_OAUTH_PASSWORD: ${MCPX_OAUTH_PASSWORD}
     ports:
+      - "8080:8080"
       - "9090:9090"
     volumes:
       - /path/to/project:/workspace
 ```
 
-Keep the OAuth password in host environment/secrets rather than committing it.
+Keep the OAuth password in host environment/secrets rather than committing it. If Pi Web is reachable by other machines, also set `PI_WEB_PASSWORD` in host environment/secrets.
 
 ## Useful commands
 

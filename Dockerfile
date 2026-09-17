@@ -85,17 +85,17 @@ RUN apt-get update \
 
 COPY --from=mcpx-builder /out/mcpx /usr/local/bin/mcpx
 COPY --from=node-tools /usr/local/bin/node /usr/local/bin/node
-COPY --from=node-tools /usr/local/bin/npm /usr/local/bin/npm
-COPY --from=node-tools /usr/local/bin/npx /usr/local/bin/npx
-COPY --from=node-tools /usr/local/bin/pi /usr/local/bin/pi
-COPY --from=node-tools /usr/local/bin/pi-web /usr/local/bin/pi-web
 COPY --from=node-tools /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY docker/dev-entrypoint.sh /usr/local/bin/dev-entrypoint
 COPY docker/default-mcpx-config.yaml /usr/share/rustmcp-harbor/default-mcpx-config.yaml
 
-RUN chmod 0755 \
-    /usr/local/bin/mcpx \
-    /usr/local/bin/dev-entrypoint
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && ln -s ../lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js /usr/local/bin/pi \
+    && ln -s ../lib/node_modules/@agegr/pi-web/bin/pi-web.js /usr/local/bin/pi-web \
+    && chmod 0755 \
+       /usr/local/bin/mcpx \
+       /usr/local/bin/dev-entrypoint
 
 ENV HOME=/config/home \
     CARGO_HOME=/config/cargo \

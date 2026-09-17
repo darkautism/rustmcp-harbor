@@ -8,9 +8,6 @@ print_versions() {
     cargo expand --version
     cargo bloat --version
     cargo nextest --version
-    node --version
-    pi --version
-    pi-web --help >/dev/null
     mcpx -version
 }
 
@@ -24,13 +21,8 @@ if (( $# > 0 )); then
     exec "$@"
 fi
 
-: "${MCPX_HOME:=/config/mcpx}"
+: "${MCPX_HOME:=/root/.mcpx}"
 : "${RUSTMCP_HARBOR_DEFAULT_MCPX_CONFIG:=/usr/share/rustmcp-harbor/default-mcpx-config.yaml}"
-: "${PI_WEB_HOSTNAME:=0.0.0.0}"
-: "${PI_WEB_PORT:=8080}"
-: "${PI_WEB_NO_OPEN:=1}"
-: "${PI_WEB_IDLE_TIMEOUT_MS:=0}"
-export PI_WEB_HOSTNAME PI_WEB_PORT PI_WEB_NO_OPEN PI_WEB_IDLE_TIMEOUT_MS
 
 umask 077
 mkdir -p "${MCPX_HOME}"
@@ -89,7 +81,7 @@ write_literal_mcpx_config() {
 
 # MCPX_CONFIG is authoritative when supplied. Otherwise the three template
 # environment variables re-render the bundled config on each container start.
-# With no environment override, an existing /config/mcpx/config.yaml is kept.
+# With no environment override, an existing /root/.mcpx/config.yaml is kept.
 if [[ -n "${MCPX_CONFIG:-}" ]]; then
     write_literal_mcpx_config
 elif [[ -n "${MCPX_BIND_HOST:-}" \
@@ -106,32 +98,4 @@ if [[ ! -s "${MCPX_HOME}/config.yaml" ]]; then
 fi
 
 cd /workspace
-
-children=()
-cleanup() {
-    local pid
-    trap - EXIT INT TERM
-    for pid in "${children[@]:-}"; do
-        if kill -0 "${pid}" 2>/dev/null; then
-            kill -TERM "${pid}" 2>/dev/null || true
-        fi
-    done
-    for pid in "${children[@]:-}"; do
-        wait "${pid}" 2>/dev/null || true
-    done
-}
-trap cleanup EXIT INT TERM
-
-mcpx &
-mcpx_pid=$!
-children+=("${mcpx_pid}")
-
-pi-web --port "${PI_WEB_PORT}" --hostname "${PI_WEB_HOSTNAME}" --no-open &
-pi_web_pid=$!
-children+=("${pi_web_pid}")
-
-set +e
-wait -n "${mcpx_pid}" "${pi_web_pid}"
-status=$?
-set -e
-exit "${status}"
+exec mcpx

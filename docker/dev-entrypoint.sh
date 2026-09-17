@@ -2,13 +2,11 @@
 set -Eeuo pipefail
 
 print_versions() {
-    rustc --version
-    cargo --version
-    rg --version
-    cargo expand --version
-    cargo bloat --version
-    cargo nextest --version
     mcpx -version
+    git --version
+    gh --version | head -n 1
+    rg --version | head -n 1
+    jq --version
 }
 
 if [[ "${1:-}" == "versions" ]]; then
@@ -16,13 +14,13 @@ if [[ "${1:-}" == "versions" ]]; then
     exit 0
 fi
 
-# Explicit commands turn the image into an ordinary Rust development shell/job.
+# Explicit commands turn the image into an ordinary development shell/job.
 if (( $# > 0 )); then
     exec "$@"
 fi
 
 : "${MCPX_HOME:=/root/.mcpx}"
-: "${RUSTMCP_HARBOR_DEFAULT_MCPX_CONFIG:=/usr/share/rustmcp-harbor/default-mcpx-config.yaml}"
+: "${MCPX_HARBOR_DEFAULT_CONFIG:=/usr/share/mcpx-harbor/default-mcpx-config.yaml}"
 
 umask 077
 mkdir -p "${MCPX_HOME}"
@@ -45,12 +43,12 @@ render_default_mcpx_config() {
     local line
     local tmp="${MCPX_HOME}/config.yaml.tmp.$$"
 
-    if grep -Fq '__OAUTH__' "${RUSTMCP_HARBOR_DEFAULT_MCPX_CONFIG}" \
+    if grep -Fq '__OAUTH__' "${MCPX_HARBOR_DEFAULT_CONFIG}" \
        && [[ -z "${oauth_password}" ]]; then
         echo "MCPX_OAUTH_PASSWORD is required by the bundled MCPX config template." >&2
         return 64
     fi
-    if grep -Fq '__HOSTNAME__' "${RUSTMCP_HARBOR_DEFAULT_MCPX_CONFIG}" \
+    if grep -Fq '__HOSTNAME__' "${MCPX_HARBOR_DEFAULT_CONFIG}" \
        && [[ -z "${server_url}" ]]; then
         echo "MCPX_SERVER_URL is required by the bundled MCPX config template (for example https://kpc.myvnc.com)." >&2
         return 64
@@ -66,7 +64,7 @@ render_default_mcpx_config() {
         line="${line//__OAUTH__/${escaped_oauth_password}}"
         line="${line//__HOSTNAME__/${escaped_server_url}}"
         printf '%s\n' "${line}" >> "${tmp}"
-    done < "${RUSTMCP_HARBOR_DEFAULT_MCPX_CONFIG}"
+    done < "${MCPX_HARBOR_DEFAULT_CONFIG}"
 
     mv "${tmp}" "${MCPX_HOME}/config.yaml"
     chmod 0600 "${MCPX_HOME}/config.yaml" 2>/dev/null || true

@@ -1,4 +1,4 @@
-# rustmcp-harbor-config-template-v1
+# mcpx-harbor-config-template-v1
 server:
     host: "__HOST_IP__"
     port: 9090
@@ -19,7 +19,7 @@ auth:
 workspaces:
   - name: workspace
     path: /workspace
-    description: "Project mounted into RustMCP Harbor"
+    description: "Project mounted into MCPX Harbor"
 
 security:
   commands:
